@@ -6,67 +6,7 @@ import langid
 import speech_recognition as sr
 import sqlite3
 from datetime import datetime
-import tkinter as tk
-import threading
-from gtts import gTTS
-import os
-
-class VoiceCaptureApp:
-    def __init__(self, root):
-        self.root = root
-        self.recognizer = sr.Recognizer()
-
-        # Inicializa a captura de voz
-        self.voice_capture_active = False
-
-        # Variável para armazenar o texto reconhecido
-        self.recognized_text = ""
-
-        # Configuração da interface
-        self.setup_ui()
-
-    def setup_ui(self):
-        self.root.title("Voice Capture App")
-
-        # Adiciona um rótulo
-        self.label = tk.Label(self.root, text="Pressione e segure a barra de espaço para capturar voz.")
-        self.label.pack(pady=10)
-
-        # Associa eventos de teclado
-        self.root.bind("<KeyPress-space>", self.start_voice_capture)
-        self.root.bind("<KeyRelease-space>", self.stop_voice_capture)
-
-    def start_voice_capture(self, event):
-        if not self.voice_capture_active:
-            self.voice_capture_active = True
-            self.label.config(text="Capturando voz...")
-
-            # Inicia a captura de voz em uma thread separada
-            self.voice_capture_thread = threading.Thread(target=self.capture_voice_thread)
-            self.voice_capture_thread.start()
-
-def stop_voice_capture(self, event):
-    if self.voice_capture_active:
-        self.voice_capture_active = False
-        self.label.config(text="Pressione e segure a barra de espaço para capturar voz.")
-
-def capture_voice_thread(self):
-    with sr.Microphone() as source:
-        while self.voice_capture_active:
-            try:
-                audio = self.recognizer.listen(source, timeout=1)
-                text = self.recognizer.recognize_google(audio, language="pt-BR")
-
-                # Armazena o texto reconhecido na variável
-                self.recognized_text = text
-
-                # Faça algo com o texto reconhecido (opcional)
-                print("Texto reconhecido:", text)
-
-            except sr.UnknownValueError:
-                pass  # Não foi possível entender o áudio
-            except sr.RequestError as e:
-                print(f"Erro na solicitação ao serviço de reconhecimento de voz: {e}")
+import pyttsx3
 
 # Inicialização do loop assíncrono
 loop = asyncio.get_event_loop()
@@ -104,6 +44,10 @@ def insert_interaction(user_input, tuti_response):
     conn.commit()
     conn.close()
 
+def speak_text(text):
+    engine = pyttsx3.init()
+    engine.say(text)
+    engine.runAndWait()
 # Função assíncrona para entrada
 async def async_input(prompt: str) -> str:
     return await loop.run_in_executor(None, functools.partial(input, prompt))
@@ -145,10 +89,7 @@ async def run_provider(provider: g4f.Provider.BaseProvider, user_input: str, max
                 max_tokens=max_tokens,
             )
 
-            # Limita a resposta ao número máximo de tokens
-            response = ' '.join(response.split()[:max_tokens])
-
-            # Imprima a resposta
+            # Imprima a resposta sem tentar decodificar
             print(f"{provider.__name__}: {response!r}")
 
         else:
@@ -156,8 +97,8 @@ async def run_provider(provider: g4f.Provider.BaseProvider, user_input: str, max
     except Exception as e:
         print(f"{provider.__name__}:", e)
 
-
-async def run_all_with_voice_input(user_input):
+# Função assíncrona para executar todas as interações
+async def run_all(user_input: str):
     global _provider, modo_texto
     
     # Inicialize o banco de dados
@@ -166,9 +107,44 @@ async def run_all_with_voice_input(user_input):
     # Log da interação no banco de dados
     insert_interaction(user_input, "")  # Inicia com uma resposta vazia
 
-    # Execute o provedor atual
-    await run_provider(_provider, user_input)
+    # Verifique o comando para alterar o provedor ou modo de texto
+    if user_input.lower() == 'modo gpt4':
+        _provider = _tuti_gpt4_provider
+        print("Entrando no modo GPT-4")
+        return
+    elif user_input.lower() == 'modo de fábrica':
+        _provider = _tuti_provider
+        print("Voltando ao estágio original")
+        return
+    elif user_input.lower() == 'modo voz':
+        modo_texto = False
+        return
 
+    # Execute o provedor atual
+    try:
+        language = detect_language(user_input)
+
+        # Verifique o idioma para execução
+        if language == 'pt':
+            response = await g4f.ChatCompletion.create_async(
+                model=g4f.models.default,
+                messages=[{"role": "user", "content": user_input}],
+                provider=_provider,
+                max_tokens=50,
+            )
+
+            # Imprima a resposta sem tentar decodificar
+            print(f"{_provider.__name__}: {response!r}")
+
+            # Use pyttsx3 to speak the response
+            speak_text(response)
+
+        else:
+            print(f"{_provider.__name__}: Input não reconhecido como português do Brasil.")
+    except Exception as e:
+        print(f"{_provider.__name__}:", e)
+
+# Bloco principal de execução
 if __name__ == "__main__":
     modo_texto = False  # Inicializa o modo de texto como False
     user_input = ""  # Defina user_input inicialmente como uma string vazia
@@ -187,5 +163,11 @@ if __name__ == "__main__":
             print("Saindo do programa. Até mais!")
             break
 
-        # Execute o provedor atual com o texto reconhecido
-        loop.run_until_complete(run_all_with_voice_input(user_input))
+        loop.run_until_complete(run_all(user_input))
+
+
+        #PRECISO CONSERTAR A PARTE DE QUE SE ELA NAO ESCUTA VOLTA PARA O MODO TEXTO
+        #TALVEZ COLOCAR TUTI COMO GATILHO PARA INTERACOES (MAS DESATIVAR A NECESSIDADE POR UM TEMPO)
+        #PENSAR MELHOR NA ARQUITETURA E SE SERÃO NECESSÁRIOS MAIS ARQUIVOS (QUAIS?)
+        #O PROBLEMA RELACIONADO COM A INTERFACE GRAFICA E A INICIALIZACAO
+        #SOMENTE O GEMINI TEM LIMITE DE CARACTERES
